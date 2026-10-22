@@ -1,0 +1,85 @@
+---
+- name: Download the NodeSource setup script
+  ansible.builtin.get_url:
+    url: https://deb.nodesource.com/setup_18.x
+    dest: /tmp/nodesource_setup.sh
+    mode: "0755"
+
+- name: Configure the NodeSource repository for Node.js 18
+  ansible.builtin.command: bash /tmp/nodesource_setup.sh
+  args:
+    creates: /etc/apt/sources.list.d/nodesource.list
+
+- name: Install Node.js and MySQL client
+  ansible.builtin.apt:
+    name:
+      - nodejs
+      - default-mysql-client
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create the EpicBook application directory
+  ansible.builtin.file:
+    path: /opt/epicbook
+    state: directory
+    owner: ubuntu
+    group: ubuntu
+    mode: "0755"
+
+- name: Synchronize application files to the backend
+  become: false
+  ansible.posix.synchronize:
+    src: "{{ playbook_dir }}/../"
+    dest: /opt/epicbook/
+    archive: true
+    delete: false
+    rsync_opts:
+      - "--exclude=.git"
+      - "--exclude=node_modules"
+      - "--exclude=ansible"
+      - "--exclude=azure-pipelines.yml"
+      - "--exclude=.env"
+
+- name: Install production Node.js dependencies from the lockfile
+  ansible.builtin.command: npm ci --omit=dev
+  args:
+    chdir: /opt/epicbook
+    creates: /opt/epicbook/node_modules/express/package.json
+  become: true
+  become_user: ubuntu
+
+- name: Deploy the production Sequelize configuration
+  ansible.builtin.template:
+    src: db-config.j2
+    dest: /opt/epicbook/config/config.json
+    owner: ubuntu
+    group: ubuntu
+    mode: "0600"
+  no_log: true
+
+- name: Create the EpicBook environment directory
+  ansible.builtin.file:
+    path: /etc/epicbook
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Deploy the protected database environment file
+  ansible.builtin.template:
+    src: epicbook.env.j2
+    dest: /etc/epicbook/epicbook.env
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
+- name: Deploy the EpicBook systemd service
+  ansible.builtin.template:
+    src: epicbook.service.j2
+    dest: /etc/systemd/system/epicbook.service
+    owner: root
+    group: root
+    mode: "0600"
+  notify: Reload systemd

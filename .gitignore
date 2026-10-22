@@ -7,3 +7,22 @@ node_modules
 ansible/inventory.ini
 ansible/group_vars/*/vault.yml
 *.retry
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# SSH private keys
+id_rsa
+id_rsa.*
+id_ed25519
+id_ed25519.*
+*_rsa
+*_ed25519
+
+# Terraform generated files
+*.tfstate
+*.tfstate.*
+*.tfplan
+.terraform/

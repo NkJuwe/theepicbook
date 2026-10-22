@@ -32,6 +32,8 @@ router.get("/", async (req, res) => {
         books: responses[0],
         categories: responses[1],
         cartCount: responses[2],
+        deploymentName: process.env.DEPLOYMENT_NAME || "Gift Nkechi Juwe",
+        deploymentDate: process.env.DEPLOYMENT_DATE || new Date().toISOString().slice(0, 10),
       });
     })
     .catch((err) => console.log(err));

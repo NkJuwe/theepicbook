@@ -1,0 +1,146 @@
+---
+- name: Wait for the RDS MySQL endpoint
+  ansible.builtin.wait_for:
+    host: "{{ mysql_fqdn }}"
+    port: 3306
+    state: started
+    timeout: 300
+  delegate_to: "{{ groups['backend'][0] }}"
+  become: false
+
+- name: Create the EpicBook database marker directory
+  ansible.builtin.file:
+    path: /var/lib/epicbook
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  delegate_to: "{{ groups['backend'][0] }}"
+  become: true
+
+- name: Check the schema initialization marker
+  ansible.builtin.stat:
+    path: /var/lib/epicbook/schema-initialized
+  register: schema_marker
+  delegate_to: "{{ groups['backend'][0] }}"
+  become: true
+
+- name: Import the EpicBook database schema
+  community.mysql.mysql_db:
+    name: "{{ db_name }}"
+    state: import
+    target: /opt/epicbook/db/BuyTheBook_Schema.sql
+    login_host: "{{ mysql_fqdn }}"
+    login_port: 3306
+    login_user: "{{ db_admin_username }}"
+    login_password: "{{ db_admin_password }}"
+  delegate_to: "{{ groups['backend'][0] }}"
+  become: false
+  no_log: true
+  when: not schema_marker.stat.exists
+
+- name: Mark schema initialization as complete
+  ansible.builtin.file:
+    path: /var/lib/epicbook/schema-initialized
+    state: touch
+    owner: root
+    group: root
+    mode: "0644"
+  delegate_to: "{{ groups['backend'][0] }}"
+  become: true
+  when: not schema_marker.stat.exists
+
+- name: Check the author seed marker
+  ansible.builtin.stat:
+    path: /var/lib/epicbook/authors-seeded
+  register: author_marker
+  delegate_to: "{{ groups['backend'][0] }}"
+  become: true
+
+- name: Import EpicBook author seed data
+  community.mysql.mysql_db:
+    name: "{{ db_name }}"
+    state: import
+    target: /opt/epicbook/db/author_seed.sql
+    login_host: "{{ mysql_fqdn }}"
+    login_port: 3306
+    login_user: "{{ db_admin_username }}"
+    login_password: "{{ db_admin_password }}"
+  delegate_to: "{{ groups['backend'][0] }}"
+  become: false
+  no_log: true
+  when: not author_marker.stat.exists
+
+- name: Mark author seeding as complete
+  ansible.builtin.file:
+    path: /var/lib/epicbook/authors-seeded
+    state: touch
+    owner: root
+    group: root
+    mode: "0644"
+  delegate_to: "{{ groups['backend'][0] }}"
+  become: true
+  when: not author_marker.stat.exists
+
+- name: Check the book seed marker
+  ansible.builtin.stat:
+    path: /var/lib/epicbook/books-seeded
+  register: book_marker
+  delegate_to: "{{ groups['backend'][0] }}"
+  become: true
+
+- name: Import EpicBook book seed data
+  community.mysql.mysql_db:
+    name: "{{ db_name }}"
+    state: import
+    target: /opt/epicbook/db/books_seed.sql
+    login_host: "{{ mysql_fqdn }}"
+    login_port: 3306
+    login_user: "{{ db_admin_username }}"
+    login_password: "{{ db_admin_password }}"
+  delegate_to: "{{ groups['backend'][0] }}"
+  become: false
+  no_log: true
+  when: not book_marker.stat.exists
+
+- name: Mark book seeding as complete
+  ansible.builtin.file:
+    path: /var/lib/epicbook/books-seeded
+    state: touch
+    owner: root
+    group: root
+    mode: "0644"
+  delegate_to: "{{ groups['backend'][0] }}"
+  become: true
+  when: not book_marker.stat.exists
+
+- name: Verify the EpicBook database tables
+  community.mysql.mysql_query:
+    login_db: "{{ db_name }}"
+    login_host: "{{ mysql_fqdn }}"
+    login_port: 3306
+    login_user: "{{ db_admin_username }}"
+    login_password: "{{ db_admin_password }}"
+    query: "SHOW TABLES"
+  register: epicbook_database_tables
+  delegate_to: "{{ groups['backend'][0] }}"
+  become: false
+  no_log: true
+
+- name: Confirm that the database contains tables
+  ansible.builtin.assert:
+    that:
+      - epicbook_database_tables.query_result[0] | length > 0
+    fail_msg: "Database verification failed: no tables were found."
+    success_msg: "Database verification passed: tables were found."
+  no_log: true
+
+- name: Mark database initialization as complete
+  ansible.builtin.file:
+    path: /var/lib/epicbook/database-initialized
+    state: touch
+    owner: root
+    group: root
+    mode: "0644"
+  delegate_to: "{{ groups['backend'][0] }}"
+  become: true
