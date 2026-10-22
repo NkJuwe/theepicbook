@@ -50,12 +50,55 @@
   become: true
   when: not schema_marker.stat.exists
 
+- name: Count existing EpicBook authors
+  community.mysql.mysql_query:
+    login_db: "{{ db_name }}"
+    login_host: "{{ mysql_fqdn }}"
+    login_port: 3306
+    login_user: "{{ db_admin_username }}"
+    login_password: "{{ db_admin_password }}"
+    query: "SELECT COUNT(*) AS row_count FROM Author"
+  register: existing_author_count
+  delegate_to: "{{ groups['backend'][0] }}"
+  become: false
+  no_log: true
+
+- name: Count existing EpicBook books
+  community.mysql.mysql_query:
+    login_db: "{{ db_name }}"
+    login_host: "{{ mysql_fqdn }}"
+    login_port: 3306
+    login_user: "{{ db_admin_username }}"
+    login_password: "{{ db_admin_password }}"
+    query: "SELECT COUNT(*) AS row_count FROM Book"
+  register: existing_book_count
+  delegate_to: "{{ groups['backend'][0] }}"
+  become: false
+  no_log: true
+
 - name: Check the author seed marker
   ansible.builtin.stat:
     path: /var/lib/epicbook/authors-seeded
   register: author_marker
   delegate_to: "{{ groups['backend'][0] }}"
   become: true
+
+- name: Check the book seed marker
+  ansible.builtin.stat:
+    path: /var/lib/epicbook/books-seeded
+  register: book_marker
+  delegate_to: "{{ groups['backend'][0] }}"
+  become: true
+
+- name: Refuse unsafe seed initialization
+  ansible.builtin.assert:
+    that:
+      - (author_marker.stat.exists and book_marker.stat.exists) or ((existing_author_count.query_result[0][0].row_count | int == 0) and (existing_book_count.query_result[0][0].row_count | int == 0))
+    fail_msg: >-
+      Database seed initialization stopped because initialization markers
+      are missing while existing author or book records were detected.
+      Review the database state before proceeding.
+    success_msg: Database state permits the configured seed initialization.
 
 - name: Import EpicBook author seed data
   community.mysql.mysql_db:
@@ -69,7 +112,10 @@
   delegate_to: "{{ groups['backend'][0] }}"
   become: false
   no_log: true
-  when: not author_marker.stat.exists
+  when:
+    - not author_marker.stat.exists
+    - existing_author_count.query_result[0][0].row_count | int == 0
+    - existing_book_count.query_result[0][0].row_count | int == 0
 
 - name: Mark author seeding as complete
   ansible.builtin.file:
@@ -81,13 +127,6 @@
   delegate_to: "{{ groups['backend'][0] }}"
   become: true
   when: not author_marker.stat.exists
-
-- name: Check the book seed marker
-  ansible.builtin.stat:
-    path: /var/lib/epicbook/books-seeded
-  register: book_marker
-  delegate_to: "{{ groups['backend'][0] }}"
-  become: true
 
 - name: Import EpicBook book seed data
   community.mysql.mysql_db:
@@ -101,7 +140,10 @@
   delegate_to: "{{ groups['backend'][0] }}"
   become: false
   no_log: true
-  when: not book_marker.stat.exists
+  when:
+    - not book_marker.stat.exists
+    - existing_author_count.query_result[0][0].row_count | int == 0
+    - existing_book_count.query_result[0][0].row_count | int == 0
 
 - name: Mark book seeding as complete
   ansible.builtin.file:
@@ -121,18 +163,22 @@
     login_port: 3306
     login_user: "{{ db_admin_username }}"
     login_password: "{{ db_admin_password }}"
-    query: "SHOW TABLES"
+    query: >-
+      SELECT table_name
+      FROM information_schema.tables
+      WHERE table_schema = '{{ db_name }}'
+        AND table_name IN ('Author', 'Book', 'Cart')
   register: epicbook_database_tables
   delegate_to: "{{ groups['backend'][0] }}"
   become: false
   no_log: true
 
-- name: Confirm that the database contains tables
+- name: Confirm that all required database tables exist
   ansible.builtin.assert:
     that:
-      - epicbook_database_tables.query_result[0] | length > 0
-    fail_msg: "Database verification failed: no tables were found."
-    success_msg: "Database verification passed: tables were found."
+      - epicbook_database_tables.query_result[0] | length == 3
+    fail_msg: "Database verification failed: one or more required tables are missing."
+    success_msg: "Database verification passed: all three required tables exist."
   no_log: true
 
 - name: Mark database initialization as complete

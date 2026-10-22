@@ -111,7 +111,7 @@ router.get("/cart", async (req, res) => {
 //gallery route
 router.get("/gallery", async (req, res) => {
   res.render("gallery", {
-  
+
   });
 });
 

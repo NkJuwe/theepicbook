@@ -1,19 +1,99 @@
-# Starter pipeline
-# Start with a minimal pipeline that you can customize to build and deploy your code.
-# Add steps that build, run tests, deploy, and more:
-# https://aka.ms/yaml
-
 trigger:
-- main
+  - main
 
 pool:
-  vmImage: ubuntu-latest
+  name: epicbook-agent-01
+
+variables:
+  - group: Epicbook-mysql-secrets
 
 steps:
-- script: echo Hello, world!
-  displayName: 'Run a one-line script'
+  - checkout: self
+    clean: true
 
-- script: |
-    echo Add other tasks to build, test, and deploy your project.
-    echo See https://aka.ms/yaml
-  displayName: 'Run a multi-line script'
+  - task: NodeTool@0
+    displayName: 'Install Node.js 18'
+    inputs:
+      versionSpec: '18.x'
+
+  - script: |
+      npm ci
+    displayName: 'Install application dependencies'
+
+  - script: |
+      npm test
+    displayName: 'Run application tests'
+
+  - task: DownloadSecureFile@1
+    name: epicbookSSHKey
+    displayName: 'Download EpicBook SSH key'
+    inputs:
+      secureFile: 'epicbook-azure-key'
+
+  - bash: |
+      set -euo pipefail
+
+      python3 -m venv "$(Agent.TempDirectory)/epicbook-ansible-venv"
+      "$(Agent.TempDirectory)/epicbook-ansible-venv/bin/python" -m pip install --upgrade pip
+      "$(Agent.TempDirectory)/epicbook-ansible-venv/bin/python" -m pip install "ansible-core==2.16.14"
+
+      echo "##vso[task.setvariable variable=ANSIBLE_VENV]$(Agent.TempDirectory)/epicbook-ansible-venv"
+    displayName: 'Create isolated Ansible environment'
+
+  - bash: |
+      set -euo pipefail
+
+      export PATH="$(ANSIBLE_VENV)/bin:$PATH"
+
+      ansible-galaxy collection install -r ansible/requirements.yml
+
+      ansible --version
+      ansible-galaxy collection list
+
+      mkdir -p "$HOME/.ssh"
+      chmod 700 "$HOME/.ssh"
+      chmod 600 "$(epicbookSSHKey.secureFilePath)"
+
+      touch "$HOME/.ssh/known_hosts"
+      chmod 600 "$HOME/.ssh/known_hosts"
+
+      ssh-keyscan -H "$FRONTEND_HOST" "$BACKEND_HOST" >> "$HOME/.ssh/known_hosts"
+    displayName: 'Install collections and prepare SSH'
+    env:
+      FRONTEND_HOST: '13.48.55.202'
+      BACKEND_HOST: '10.0.2.14'
+
+  - bash: |
+      set -euo pipefail
+
+      trap 'rm -f "$VARS_FILE"' EXIT
+
+      python3 - <<'PY'
+      import json
+      import os
+      import pathlib
+
+      path = pathlib.Path(os.environ["VARS_FILE"])
+      data = {
+          "db_admin_username": os.environ["DB_ADMIN_USERNAME"],
+          "db_admin_password": os.environ["DB_ADMIN_PASSWORD"],
+          "deployment_name": "EpicBook"
+      }
+
+      path.write_text(json.dumps(data), encoding="utf-8")
+      path.chmod(0o600)
+      PY
+
+      export PATH="$(ANSIBLE_VENV)/bin:$PATH"
+
+      ansible-playbook \
+        -i ansible/inventory/hosts.ini \
+        ansible/site.yml \
+        --private-key "$(epicbookSSHKey.secureFilePath)" \
+        --extra-vars "@${VARS_FILE}"
+    displayName: 'Deploy EpicBook with Ansible'
+    env:
+      ANSIBLE_VENV: $(Agent.TempDirectory)/epicbook-ansible-venv
+      DB_ADMIN_USERNAME: $(mysqlAdminUsername)
+      DB_ADMIN_PASSWORD: $(mysqlAdminPassword)
+      VARS_FILE: $(Agent.TempDirectory)/epicbook-ansible-vars.json
