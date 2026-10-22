@@ -60,7 +60,7 @@ steps:
       ssh-keyscan -H "$FRONTEND_HOST" "$BACKEND_HOST" >> "$HOME/.ssh/known_hosts"
     displayName: 'Install collections and prepare SSH'
     env:
-      FRONTEND_HOST: '13.48.55.202'
+      FRONTEND_HOST: '10.0.1.14'
       BACKEND_HOST: '10.0.2.14'
 
   - bash: |
