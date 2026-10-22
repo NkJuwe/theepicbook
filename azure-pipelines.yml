@@ -2,7 +2,7 @@ trigger:
   - main
 
 pool:
-  name: epicbook-agent-01
+  name: EpicBookSelfHostedPool
 
 variables:
   - group: Epicbook-mysql-secrets
